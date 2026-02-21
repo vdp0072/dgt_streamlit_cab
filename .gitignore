@@ -1,0 +1,9 @@
+.venv/
+env/
+.env
+data.db
+dry_run_normalized.csv
+failed_rows.csv
+__pycache__/
+*.pyc
+.streamlit/secrets.toml
