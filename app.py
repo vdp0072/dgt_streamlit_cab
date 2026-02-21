@@ -19,15 +19,18 @@ st.set_page_config(page_title="Supabase Ingest Dashboard", layout="wide")
 st.title("Ingest + Dashboard (Supabase)")
 
 # Create Supabase client if credentials available
-SUPABASE_URL = None
-SUPABASE_KEY = None
-if "SUPABASE_URL" in st.secrets:
-    SUPABASE_URL = st.secrets["SUPABASE_URL"]
-    SUPABASE_KEY = st.secrets.get("SUPABASE_ANON_KEY") or st.secrets.get("SUPABASE_KEY")
-else:
-    # local dev: read from environment / .env
-    SUPABASE_URL = os.getenv("SUPABASE_URL")
-    SUPABASE_KEY = os.getenv("SUPABASE_API_KEY") or os.getenv("SUPABASE_ANON_KEY")
+# Prefer st.secrets in deployed env, but handle missing secrets file gracefully.
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_API_KEY") or os.getenv("SUPABASE_ANON_KEY")
+
+try:
+    # Accessing st.secrets may raise FileNotFoundError when no secrets.toml exists locally
+    if (not SUPABASE_URL) and ("SUPABASE_URL" in st.secrets):
+        SUPABASE_URL = st.secrets.get("SUPABASE_URL")
+        SUPABASE_KEY = st.secrets.get("SUPABASE_ANON_KEY") or st.secrets.get("SUPABASE_KEY")
+except FileNotFoundError:
+    # no secrets file locally; rely on env vars
+    pass
 
 supabase = None
 if create_client and SUPABASE_URL and SUPABASE_KEY:
@@ -75,8 +78,7 @@ def fetch_user_role(user_id, token=None):
     return "user"
 
 
-uploaded = st.file_uploader("Upload CSV to ingest", type=["csv"])
-uploaded = st.file_uploader("Upload CSV to ingest", type=["csv"])
+uploaded = st.file_uploader("Upload CSV to ingest", type=["csv"], key="upload_main")
 
 # Authentication UI
 if "user" not in st.session_state:
