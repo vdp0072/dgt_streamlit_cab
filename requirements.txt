@@ -4,4 +4,6 @@ sqlalchemy
 psycopg2-binary
 requests
 streamlit
-altair
+# Pin Altair v4 for Streamlit Cloud compatibility (provides altair.vegalite.v4)
+altair==4.2.2
+vega_datasets
