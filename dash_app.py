@@ -179,7 +179,14 @@ def main():
                 y=alt.Y("count:Q", title="Added per day"),
                 tooltip=[alt.Tooltip("day:T", title="Date"), alt.Tooltip("count:Q", title="Added")],
             ).properties(height=300)
-            st.altair_chart(line, width='stretch')
+            # streamlit versions differ: try new 'width' API, fall back to older 'use_container_width'
+            try:
+                st.altair_chart(line, width='stretch')
+            except TypeError:
+                try:
+                    st.altair_chart(line, use_container_width=True)
+                except TypeError:
+                    st.altair_chart(line)
         else:
             st.write("No daily data")
 
@@ -191,7 +198,13 @@ def main():
                 color=alt.Color(field="label", type="nominal"),
                 tooltip=[alt.Tooltip("label:N"), alt.Tooltip("count:Q")],
             )
-            st.altair_chart(pie, width='stretch')
+            try:
+                st.altair_chart(pie, width='stretch')
+            except TypeError:
+                try:
+                    st.altair_chart(pie, use_container_width=True)
+                except TypeError:
+                    st.altair_chart(pie)
         else:
             st.write("No distribution data")
 
@@ -217,7 +230,13 @@ def main():
     ).properties(height=300)
 
     st.subheader("Rows added daily")
-    st.altair_chart(line, width='stretch')
+    try:
+        st.altair_chart(line, width='stretch')
+    except TypeError:
+        try:
+            st.altair_chart(line, use_container_width=True)
+        except TypeError:
+            st.altair_chart(line)
 
     # Distribution pie
     dist_df = categorize_distribution(df)
@@ -227,7 +246,13 @@ def main():
         color=alt.Color(field="label", type="nominal"),
         tooltip=[alt.Tooltip("label:N"), alt.Tooltip("count:Q")],
     )
-    st.altair_chart(pie, width='stretch')
+    try:
+        st.altair_chart(pie, width='stretch')
+    except TypeError:
+        try:
+            st.altair_chart(pie, use_container_width=True)
+        except TypeError:
+            st.altair_chart(pie)
 
     st.write("---")
     st.caption("Hosted on Supabase — for RPC endpoints contact admin: virendra@acadflip.com")
