@@ -110,13 +110,54 @@ def login_form():
             # extract user and token depending on client response shape
             user = None
             token = None
+
+            # helper to coerce various response shapes into a plain dict for the user
+            def to_dict(obj):
+                if obj is None:
+                    return None
+                if isinstance(obj, dict):
+                    return obj
+                # pydantic model (supabase clients often return pydantic objects)
+                if hasattr(obj, "model_dump"):
+                    try:
+                        return obj.model_dump()
+                    except Exception:
+                        pass
+                if hasattr(obj, "dict"):
+                    try:
+                        return obj.dict()
+                    except Exception:
+                        pass
+                # fallback: try to extract common attributes
+                out = {}
+                for a in ("id", "email", "user_metadata"):
+                    try:
+                        val = getattr(obj, a)
+                        out[a] = val
+                    except Exception:
+                        pass
+                return out or None
+
+            # resp may be dict-like or pydantic object
             if isinstance(resp, dict):
-                token = resp.get("access_token") or resp.get("session", {}).get("access_token")
-                user = resp.get("user") or resp.get("session", {}).get("user")
+                token = resp.get("access_token") or (resp.get("session") or {}).get("access_token")
+                user_raw = resp.get("user") or (resp.get("session") or {}).get("user")
+                user = to_dict(user_raw)
             else:
-                # try attribute access
-                token = getattr(resp, "access_token", None) or getattr(resp, "session", {}).get("access_token")
-                user = getattr(resp, "user", None) or getattr(resp, "session", {}).get("user")
+                # try attribute access safely
+                token = getattr(resp, "access_token", None)
+                if not token:
+                    try:
+                        token = getattr(resp, "session", {}).get("access_token")
+                    except Exception:
+                        token = None
+                user_raw = getattr(resp, "user", None)
+                if not user_raw:
+                    try:
+                        user_raw = getattr(resp, "session", {}).get("user")
+                    except Exception:
+                        user_raw = None
+                user = to_dict(user_raw)
 
             if not user:
                 st.error("Sign-in failed: no user returned")
@@ -124,9 +165,9 @@ def login_form():
 
             st.session_state.user = user
             st.session_state.token = token
-            uid = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+            uid = user.get("id")
             st.session_state.role = fetch_user_role(uid, token)
-            st.success(f"Signed in as {user.get('email') if isinstance(user, dict) else uid}")
+            st.success(f"Signed in as {user.get('email') or uid}")
 
 
 def logout():

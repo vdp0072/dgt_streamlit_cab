@@ -1,6 +1,7 @@
-pandas>=1.5
-SQLAlchemy>=1.4
-psycopg2-binary>=2.9
-python-dotenv>=1.0
-streamlit>=1.20
-supabase>=1.0
+pandas
+click
+sqlalchemy
+psycopg2-binary
+requests
+streamlit
+altair
