@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 import sys
 import os
 import requests
+import pandas as pd
+from pandas.api import types as pdtypes
 import inspect
 
 
@@ -139,7 +141,7 @@ def main():
             "Content-Type": "application/json",
         }
 
-        # helper to call rpc
+    # helper to call rpc
         def call_rpc(name: str, payload: dict = None):
             url = f"{rest_base}/rpc/{name}"
             r = requests.post(url, headers=headers, json=payload or {})
@@ -173,6 +175,22 @@ def main():
         except Exception:
             df_daily = pd.DataFrame(columns=["day", "count"])
 
+        # sanitize dataframes to avoid pyarrow LargeUtf8 issues when Streamlit serializes
+        def sanitize_df(df: pd.DataFrame) -> pd.DataFrame:
+            # Convert extension/string-backed columns to plain Python strings
+            df = df.copy()
+            for col in df.columns:
+                try:
+                    if pdtypes.is_string_dtype(df[col]) or pdtypes.is_object_dtype(df[col]) or pdtypes.is_extension_array_dtype(df[col]):
+                        df[col] = df[col].astype(str)
+                except Exception:
+                    # fallback: coerce to str
+                    df[col] = df[col].apply(lambda x: "" if pd.isna(x) else str(x))
+            return df
+
+        if not df_daily.empty:
+            df_daily = sanitize_df(df_daily)
+
         st.subheader("Rows added daily")
         if not df_daily.empty:
             line = alt.Chart(df_daily).mark_line(point=True).encode(
@@ -199,6 +217,7 @@ def main():
         st.subheader("Contacts distribution")
         if not df_dist.empty:
             df_dist = df_dist.rename(columns={"cnt": "count", "label": "label"})
+            df_dist = sanitize_df(df_dist)
             pie = alt.Chart(df_dist).mark_arc().encode(
                 theta=alt.Theta(field="count", type="quantitative"),
                 color=alt.Color(field="label", type="nominal"),
