@@ -193,7 +193,9 @@ def main():
 
         st.subheader("Rows added daily")
         if not df_daily.empty:
-            line = alt.Chart(df_daily).mark_line(point=True).encode(
+            # use embedded values to avoid Streamlit Arrow serialization issues
+            records = df_daily.to_dict(orient="records")
+            line = alt.Chart(alt.Data(values=records)).mark_line(point=True).encode(
                 x=alt.X("day:T", title="Date"),
                 y=alt.Y("count:Q", title="Added per day"),
                 tooltip=[alt.Tooltip("day:T", title="Date"), alt.Tooltip("count:Q", title="Added")],
@@ -218,7 +220,8 @@ def main():
         if not df_dist.empty:
             df_dist = df_dist.rename(columns={"cnt": "count", "label": "label"})
             df_dist = sanitize_df(df_dist)
-            pie = alt.Chart(df_dist).mark_arc().encode(
+            dist_records = df_dist.to_dict(orient="records")
+            pie = alt.Chart(alt.Data(values=dist_records)).mark_arc().encode(
                 theta=alt.Theta(field="count", type="quantitative"),
                 color=alt.Color(field="label", type="nominal"),
                 tooltip=[alt.Tooltip("label:N"), alt.Tooltip("count:Q")],
@@ -252,7 +255,9 @@ def main():
 
     # Daily added chart
     daily = daily_counts(df, days)
-    line = alt.Chart(daily).mark_line(point=True).encode(
+    daily = sanitize_df(daily)
+    records = daily.to_dict(orient="records")
+    line = alt.Chart(alt.Data(values=records)).mark_line(point=True).encode(
         x=alt.X("day:T", title="Date"),
         y=alt.Y("count:Q", title="Added per day"),
         tooltip=[alt.Tooltip("day:T", title="Date"), alt.Tooltip("count:Q", title="Added")],
@@ -273,8 +278,9 @@ def main():
 
     # Distribution pie
     dist_df = categorize_distribution(df)
+    dist_df = sanitize_df(dist_df)
     st.subheader("Contacts distribution")
-    pie = alt.Chart(dist_df).mark_arc().encode(
+    pie = alt.Chart(alt.Data(values=dist_df.to_dict(orient="records"))).mark_arc().encode(
         theta=alt.Theta(field="count", type="quantitative"),
         color=alt.Color(field="label", type="nominal"),
         tooltip=[alt.Tooltip("label:N"), alt.Tooltip("count:Q")],
