@@ -12,6 +12,110 @@ import requests
 import pandas as pd
 from pandas.api import types as pdtypes
 import inspect
+import json
+import matplotlib.pyplot as plt
+from io import BytesIO
+
+
+def make_jsonable_records(df: pd.DataFrame):
+    """Convert a DataFrame to a list of JSON-safe Python dicts.
+    Dates -> ISO strings, NA -> None, numpy scalars -> Python scalars.
+    """
+    if df is None or df.empty:
+        return []
+    s = df.copy()
+    # convert datetimes to ISO strings
+    for col in s.columns:
+        try:
+            if pd.api.types.is_datetime64_any_dtype(s[col]):
+                s[col] = s[col].dt.strftime("%Y-%m-%dT%H:%M:%S")
+        except Exception:
+            pass
+    # replace NA-like with null
+    s = s.where(pd.notnull(s), None)
+    # use pandas' JSON roundtrip to get plain Python types
+    try:
+        json_text = s.to_json(orient="records", date_format="iso")
+        records = json.loads(json_text)
+    except Exception:
+        # fallback: coerce to plain python types via iterrows
+        records = []
+        for _, row in s.iterrows():
+            rec = {}
+            for k, v in row.items():
+                if pd.isna(v):
+                    rec[k] = None
+                elif isinstance(v, (pd.Timestamp, datetime)):
+                    rec[k] = v.isoformat()
+                else:
+                    try:
+                        if hasattr(v, "item"):
+                            rec[k] = v.item()
+                        else:
+                            rec[k] = v
+                    except Exception:
+                        rec[k] = str(v)
+            records.append(rec)
+    return records
+
+
+def render_vega_spec(spec: dict):
+    try:
+        sig = inspect.signature(st.vega_lite_chart)
+        params = sig.parameters
+        if 'width' in params:
+            st.vega_lite_chart(spec, width='stretch')
+        elif 'use_container_width' in params:
+            st.vega_lite_chart(spec, use_container_width=True)
+        else:
+            st.vega_lite_chart(spec)
+    except Exception:
+        try:
+            st.vega_lite_chart(spec)
+        except Exception:
+            st.write("Failed to render vega spec")
+
+
+def render_line_matplotlib(records):
+    # records: list of dicts with 'day' and 'count'
+    if not records:
+        return None
+    df = pd.DataFrame(records)
+    if 'day' in df.columns:
+        df['day'] = pd.to_datetime(df['day'], errors='coerce')
+    else:
+        return None
+    df = df.sort_values('day')
+    fig, ax = plt.subplots(figsize=(8, 3))
+    ax.plot(df['day'], df['count'], marker='o')
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Added')
+    ax.grid(alpha=0.3)
+    fig.autofmt_xdate()
+    buf = BytesIO()
+    fig.tight_layout()
+    fig.savefig(buf, format='png')
+    buf.seek(0)
+    plt.close(fig)
+    return buf
+
+
+def render_pie_matplotlib(records):
+    if not records:
+        return None
+    df = pd.DataFrame(records)
+    labels = df['label'].astype(str).tolist()
+    sizes = df['count'].astype(int).tolist()
+    fig, ax = plt.subplots(figsize=(4, 4))
+    ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
+    ax.axis('equal')
+    buf = BytesIO()
+    fig.tight_layout()
+    fig.savefig(buf, format='png')
+    buf.seek(0)
+    plt.close(fig)
+    return buf
+import json
 
 
 DB_PATH = Path("data") / "contacts.db"
@@ -175,68 +279,83 @@ def main():
         except Exception:
             df_daily = pd.DataFrame(columns=["day", "count"])
 
-        # sanitize dataframes to avoid pyarrow LargeUtf8 issues when Streamlit serializes
-        def sanitize_df(df: pd.DataFrame) -> pd.DataFrame:
-            # Convert extension/string-backed columns to plain Python strings
-            df = df.copy()
-            for col in df.columns:
+        # helper to make JSON-serializable records (avoid Arrow extension types)
+        def make_jsonable_records(df: pd.DataFrame):
+            if df is None or df.empty:
+                return []
+            s = df.copy()
+            # convert datetimes to ISO strings
+            for col in s.columns:
                 try:
-                    if pdtypes.is_string_dtype(df[col]) or pdtypes.is_object_dtype(df[col]) or pdtypes.is_extension_array_dtype(df[col]):
-                        df[col] = df[col].astype(str)
+                    if pd.api.types.is_datetime64_any_dtype(s[col]):
+                        s[col] = s[col].dt.strftime("%Y-%m-%dT%H:%M:%S")
                 except Exception:
-                    # fallback: coerce to str
-                    df[col] = df[col].apply(lambda x: "" if pd.isna(x) else str(x))
-            return df
+                    pass
+            # replace NA-like with null
+            s = s.where(pd.notnull(s), None)
+            # use pandas' JSON roundtrip to get plain Python types
+            try:
+                json_text = s.to_json(orient="records", date_format="iso")
+                records = json.loads(json_text)
+            except Exception:
+                # fallback: coerce to plain python types via applymap
+                records = []
+                for _, row in s.iterrows():
+                    rec = {}
+                    for k, v in row.items():
+                        if pd.isna(v):
+                            rec[k] = None
+                        elif isinstance(v, (pd.Timestamp, datetime)):
+                            rec[k] = v.isoformat()
+                        else:
+                            try:
+                                # convert numpy types to python scalars
+                                if hasattr(v, "item"):
+                                    rec[k] = v.item()
+                                else:
+                                    rec[k] = v
+                            except Exception:
+                                rec[k] = str(v)
+                    records.append(rec)
+            return records
 
-        if not df_daily.empty:
-            df_daily = sanitize_df(df_daily)
+        def render_vega_spec(spec: dict):
+            # Render a Vega-Lite spec via Streamlit, choosing compatible kwargs
+            try:
+                sig = inspect.signature(st.vega_lite_chart)
+                params = sig.parameters
+                if 'width' in params:
+                    st.vega_lite_chart(spec, width='stretch')
+                elif 'use_container_width' in params:
+                    st.vega_lite_chart(spec, use_container_width=True)
+                else:
+                    st.vega_lite_chart(spec)
+            except Exception:
+                try:
+                    st.vega_lite_chart(spec)
+                except Exception:
+                    st.write("Failed to render vega spec")
 
         st.subheader("Rows added daily")
         if not df_daily.empty:
-            # use embedded values to avoid Streamlit Arrow serialization issues
-            records = df_daily.to_dict(orient="records")
-            line = alt.Chart(alt.Data(values=records)).mark_line(point=True).encode(
-                x=alt.X("day:T", title="Date"),
-                y=alt.Y("count:Q", title="Added per day"),
-                tooltip=[alt.Tooltip("day:T", title="Date"), alt.Tooltip("count:Q", title="Added")],
-            ).properties(height=300)
-            # Use introspection to choose the correct altair_chart signature for this Streamlit
-            try:
-                sig = inspect.signature(st.altair_chart)
-                params = sig.parameters
-                if 'width' in params:
-                    st.altair_chart(line, width='stretch')
-                elif 'use_container_width' in params:
-                    st.altair_chart(line, use_container_width=True)
-                else:
-                    st.altair_chart(line)
-            except Exception:
-                # last-resort fallback
-                st.altair_chart(line)
+            records = make_jsonable_records(df_daily)
+            buf = render_line_matplotlib(records)
+            if buf is not None:
+                st.image(buf)
+            else:
+                st.write("No daily data")
         else:
             st.write("No daily data")
 
         st.subheader("Contacts distribution")
         if not df_dist.empty:
             df_dist = df_dist.rename(columns={"cnt": "count", "label": "label"})
-            df_dist = sanitize_df(df_dist)
-            dist_records = df_dist.to_dict(orient="records")
-            pie = alt.Chart(alt.Data(values=dist_records)).mark_arc().encode(
-                theta=alt.Theta(field="count", type="quantitative"),
-                color=alt.Color(field="label", type="nominal"),
-                tooltip=[alt.Tooltip("label:N"), alt.Tooltip("count:Q")],
-            )
-            try:
-                sig = inspect.signature(st.altair_chart)
-                params = sig.parameters
-                if 'width' in params:
-                    st.altair_chart(pie, width='stretch')
-                elif 'use_container_width' in params:
-                    st.altair_chart(pie, use_container_width=True)
-                else:
-                    st.altair_chart(pie)
-            except Exception:
-                st.altair_chart(pie)
+            dist_records = make_jsonable_records(df_dist)
+            buf = render_pie_matplotlib(dist_records)
+            if buf is not None:
+                st.image(buf)
+            else:
+                st.write("No distribution data")
         else:
             st.write("No distribution data")
 
@@ -255,8 +374,7 @@ def main():
 
     # Daily added chart
     daily = daily_counts(df, days)
-    daily = sanitize_df(daily)
-    records = daily.to_dict(orient="records")
+    records = make_jsonable_records(daily)
     line = alt.Chart(alt.Data(values=records)).mark_line(point=True).encode(
         x=alt.X("day:T", title="Date"),
         y=alt.Y("count:Q", title="Added per day"),
@@ -264,38 +382,22 @@ def main():
     ).properties(height=300)
 
     st.subheader("Rows added daily")
-    try:
-        sig = inspect.signature(st.altair_chart)
-        params = sig.parameters
-        if 'width' in params:
-            st.altair_chart(line, width='stretch')
-        elif 'use_container_width' in params:
-            st.altair_chart(line, use_container_width=True)
-        else:
-            st.altair_chart(line)
-    except Exception:
-        st.altair_chart(line)
+    records = make_jsonable_records(daily)
+    buf = render_line_matplotlib(records)
+    if buf is not None:
+        st.image(buf)
+    else:
+        st.write("No daily data")
 
     # Distribution pie
     dist_df = categorize_distribution(df)
-    dist_df = sanitize_df(dist_df)
+    dist_records = make_jsonable_records(dist_df)
     st.subheader("Contacts distribution")
-    pie = alt.Chart(alt.Data(values=dist_df.to_dict(orient="records"))).mark_arc().encode(
-        theta=alt.Theta(field="count", type="quantitative"),
-        color=alt.Color(field="label", type="nominal"),
-        tooltip=[alt.Tooltip("label:N"), alt.Tooltip("count:Q")],
-    )
-    try:
-        sig = inspect.signature(st.altair_chart)
-        params = sig.parameters
-        if 'width' in params:
-            st.altair_chart(pie, width='stretch')
-        elif 'use_container_width' in params:
-            st.altair_chart(pie, use_container_width=True)
-        else:
-            st.altair_chart(pie)
-    except Exception:
-        st.altair_chart(pie)
+    buf = render_pie_matplotlib(dist_records)
+    if buf is not None:
+        st.image(buf)
+    else:
+        st.write("No distribution data")
 
     st.write("---")
     st.caption("Hosted on Supabase — for RPC endpoints contact admin: virendra@acadflip.com")

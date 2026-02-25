@@ -8,3 +8,4 @@ streamlit
 altair==4.2.2
 vega_datasets
 ./imghdr_pkg
+matplotlib
